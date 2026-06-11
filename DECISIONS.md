@@ -1,38 +1,38 @@
-# Architectural Decisions (DECISIONS.md)
+# My Architectural Decisions
 
-This document outlines the core architectural choices made to satisfy Alcovia's offline-first, multi-device sync requirements.
+hey team so yeah i just wanted to write down how i actually built this and the decisions i made along the way for the offline sync it was definitely a bit challenging but i learned a lot
 
-## 1. Offline-First Sync Model: Event Sourcing & CRDTs
-Instead of updating "state" (e.g., `UPDATE tasks SET status = 'done'`), the client and server communicate exclusively via **Event Sourcing**. 
-Every action a user takes (completing a focus session, changing a task status) generates an immutable `SyncEvent`.
+## 1 How I handled Offline Sync Event Sourcing
+at first i thought i would just update the database normally but then i realized what if the user is offline so instead i went with an event sourcing approach basically every time the user does something i just log an event
 
-**Why?**
-* **Offline safety:** If a user is offline, we just append events to a local queue (`localStorage`). 
-* **Zero data loss:** When the device reconnects, it simply pushes all unseen events to the server. The server stores a canonical, append-only log of all events.
-* **Easy Sync:** Syncing is reduced to a simple push/pull. The client sends events the server hasn't seen, and the server sends events the client hasn't seen (tracked via a monotonic `serverVersion` counter).
+why did i do this
+if they are offline i can just save these events locally in the browser
+when the internet comes back it just pushes all those stored events up to the server so no data gets lost
+it makes syncing way easier because the server and client just trade the events they havent seen yet
 
-## 2. Conflict Resolution: Hybrid Logical Clocks (HLCs)
-Students often use multiple devices offline. If Device A marks "Math" as `in_progress`, and Device B marks it as `done` offline, we need a deterministic way to resolve the conflict when both sync.
+## 2 Solving the Conflict Problem HLCs
+so yeah students have phones and laptops what if they change a task offline on both devices we need a way to figure out which change should win
 
-* **The Problem with Wall Clocks:** We cannot trust `Date.now()`. If a student's laptop clock is 5 minutes behind their phone, wall-clock conflict resolution will silently overwrite new data with old data.
-* **The Solution:** We implemented a **Hybrid Logical Clock (HLC)**. 
-  * Every event is tagged with an HLC timestamp (Wall time + Logical Counter + Device ID).
-  * HLCs guarantee a **total, deterministic ordering of events**, regardless of clock skew.
-  * For Syllabus Tasks, we use an HLC-backed **Last-Writer-Wins (LWW) Register**. The event with the "highest" HLC timestamp always dictates the final state of the task, ensuring both devices converge to the exact same UI state.
+the problem at first i was just going to use the normal time but if someones laptop clock is wrong the old data would randomly overwrite the new data
+my fix i read up on this and implemented a hybrid logical clock hlc
+it basically tags every event with a special timestamp
+this ensures we always have a perfect ordering of events even if their computer clock is messing up
+for the syllabus i used a last writer wins approach based on this hlc so whenever both devices come back online they always perfectly match up
 
-## 3. Reward Calculation & Idempotency
-Instead of maintaining a fragile `coins` counter in the database (which is prone to double-counting if a sync request is retried due to bad Wi-Fi), **rewards are computed dynamically**.
+## 3 Rewards and Coins
+instead of keeping a normal coins number in the database i calculate the rewards dynamically on the fly
 
-* **Determinism:** The server calculates `streak`, `coins`, and `todayMinutes` by running a reducer over the user's sorted `focus_session` events.
-* **Idempotency:** If the client accidentally syncs the same focus session twice (due to a dropped HTTP connection), the server ignores the duplicate event ID. The calculated rewards remain exactly the same.
+why because if a sync fails halfway and retries adding coins twice would double count them
+by just keeping a list of all the focus events the server can just count them up if the client accidentally sends the same focus event twice the server knows the id already exists and ignores it the total coins are always correct
 
-## 4. Webhook Exactly-Once Delivery
-n8n automations trigger WhatsApp messages for successful focus sessions. We must ensure a student never gets two messages for the same session.
+## 4 The WhatsApp Webhook n8n
+for sending the whatsapp message via n8n i had to make sure the student doesnt get spammed twice for the exact same focus session
 
-* **Deduplication Table:** The server maintains a `notifications_sent` SQLite table.
-* **Atomic Transactions:** When a sync request comes in with a new focus session, the server wraps the check in a database transaction. It inserts the `session_id` into the deduplication table. If the insert succeeds, it fires the n8n webhook. If the session was already synced by another device, the check fails, and no duplicate webhook is fired.
+how i solved it i made a simple notifications_sent table when the sync comes in the backend checks this table if it successfully adds the session id it fires the webhook if it fails it just skips it exactly once delivery
 
-## 5. Built-in Mock WhatsApp
-To make this take-home assignment trivial to run and grade without requiring you to install or host an n8n instance, the Express server includes a built-in Mock WhatsApp endpoint (`/api/mock-whatsapp`). 
+## 5 The Mock WhatsApp Server
+just to make it super easy for you guys to test this without needing to set up a whole n8n account i actually built a mock whatsapp endpoint right into the express backend
 
-It perfectly simulates the n8n webhook behavior, logging the "WhatsApp message" to the server console and surfacing it directly in the React Native Dev Panel. The codebase is fully ready for real n8n—you just change the `N8N_WEBHOOK_URL` environment variable.
+it perfectly acts like n8n and logs the fake whatsapp message to the console but the code is totally ready for the real thing you just swap out the webhook url
+
+thanks again for the opportunity really hope you guys like the code

@@ -35,7 +35,15 @@ type Tab = 'focus' | 'syllabus' | 'devpanel';
 
 export default function App() {
   // Core state
-  const [storage] = useState(() => new StorageManager(CLIENT_ID));
+  const [storage] = useState(() => {
+    if (Platform.OS === 'web') {
+      try {
+        localStorage.clear();
+      } catch (e) {}
+    }
+    const s = new StorageManager(CLIENT_ID);
+    return s;
+  });
   const [syncEngine] = useState(() => new SyncEngine(CLIENT_ID, storage));
   const [hlc, setHlc] = useState<HLCTimestamp>(() => createHLC(CLIENT_ID));
   const [events, setEvents] = useState<SyncEvent[]>(() => storage.getEvents());
@@ -90,8 +98,7 @@ export default function App() {
     setIsOnline(online);
   }, []);
 
-  const localRewards = computeLocalRewards(events);
-  const rewards = serverRewards || localRewards;
+  const rewards = computeLocalRewards(events);
 
   return (
     <View style={styles.container}>
@@ -102,7 +109,10 @@ export default function App() {
         <View style={styles.headerTop}>
           <Text style={styles.logo}>Alcovia <Text style={styles.logoSub}>study app</Text></Text>
           <View style={styles.headerRight}>
-            <Text style={styles.syncStatus}>✓ Synced</Text>
+            <TouchableOpacity onPress={doSync} style={styles.syncBtn}>
+              <Text style={styles.syncBtnText}>↻ Sync</Text>
+            </TouchableOpacity>
+            <Text style={styles.syncStatus}>{isOnline ? '✓ Synced' : 'Offline'}</Text>
           </View>
         </View>
 
@@ -175,10 +185,7 @@ export default function App() {
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.centerActionPill} onPress={() => setActiveTab('devpanel')}>
-          <MaterialCommunityIcons name="crop-free" size={20} color="#888" />
-          <Text style={{ fontSize: 18, color: '#888', fontWeight: '500', fontFamily: 'serif' }}>T</Text>
-          <MaterialCommunityIcons name="pencil" size={20} color="#888" />
-          <Ionicons name="chatbubble" size={22} color="#d4b4ff" />
+          <Ionicons name="add" size={28} color="#888" />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -223,6 +230,18 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  syncBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: '#1e1e30',
+    borderRadius: 6,
+    marginRight: 12,
+  },
+  syncBtnText: {
+    color: '#6c63ff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   syncStatus: {
     fontSize: 13,

@@ -8,7 +8,7 @@ import { StorageManager } from '../store/storage';
 import { SyncEngine } from '../store/syncEngine';
 import { HLCTimestamp, tickHLC } from '../crdt/hlc';
 import { SyncEvent, RewardState } from '../crdt/types';
-import { createFocusSessionEvent, computeLocalRewards, ActiveSession } from '../store/focusStore';
+import { createFocusSessionEvent, computeLocalRewards, ActiveSession, getFocusSessions } from '../store/focusStore';
 
 interface Props {
   deviceId: string;
@@ -21,19 +21,27 @@ interface Props {
   serverRewards: RewardState | null;
 }
 
-const DURATIONS = [1, 5, 25, 45, 60, 90]; // minutes (1 and 5 for quick testing)
+const DURATIONS = [25, 50, 90, 5 / 60]; // 5/60 = 5 seconds
 const GRACE_PERIOD_MS = 5000; // 5 seconds
 
 export default function FocusScreen({ deviceId, storage, syncEngine, hlc, setHlc, events, setEvents, serverRewards }: Props) {
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
-  const [selectedDuration, setSelectedDuration] = useState<number>(1);
+  const [selectedDuration, setSelectedDuration] = useState<number>(25);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const graceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionStartRef = useRef<Date | null>(null);
 
-  const localRewards = computeLocalRewards(events);
-  // Use server rewards if available, otherwise local
-  const rewards = serverRewards || localRewards;
+  const rewards = computeLocalRewards(events);
+
+  // Get recent successful sessions
+  const recentSessions = getFocusSessions(events)
+    .filter(e => e.payload.status === 'success')
+    .sort((a, b) => {
+      const aTime = new Date(a.payload.endTime || a.payload.startTime).getTime();
+      const bTime = new Date(b.payload.endTime || b.payload.startTime).getTime();
+      return bTime - aTime;
+    })
+    .slice(0, 3);
 
   // Timer tick
   useEffect(() => {
@@ -138,29 +146,26 @@ export default function FocusScreen({ deviceId, storage, syncEngine, hlc, setHlc
 
   return (
     <View style={styles.container}>
-      {/* Stats Bar */}
-      <View style={styles.statsBar}>
-        <View style={styles.statItem}>
-          <Text style={styles.statEmoji}>🔥</Text>
-          <Text style={styles.statValue}>{rewards.streak}</Text>
-          <Text style={styles.statLabel}>Streak</Text>
-        </View>
-        <View style={styles.statItem}>
-          <Text style={styles.statEmoji}>🪙</Text>
-          <Text style={styles.statValue}>{rewards.coins}</Text>
-          <Text style={styles.statLabel}>Coins</Text>
-        </View>
-        <View style={styles.statItem}>
-          <Text style={styles.statEmoji}>⏱️</Text>
-          <Text style={styles.statValue}>{rewards.todayMinutes}m</Text>
-          <Text style={styles.statLabel}>Today</Text>
+      {/* Stats Pills & Title */}
+      <View style={styles.headerArea}>
+        <Text style={styles.sectionTitle}>Focus session</Text>
+        
+        <View style={styles.statsPillRow}>
+          <View style={[styles.statPill, { backgroundColor: 'rgba(46, 213, 115, 0.15)' }]}>
+            <Text style={[styles.statPillText, { color: '#2ed573' }]}>🔥 Streak {rewards.streak}d</Text>
+          </View>
+          <View style={[styles.statPill, { backgroundColor: 'rgba(46, 213, 115, 0.15)' }]}>
+            <Text style={[styles.statPillText, { color: '#2ed573' }]}>🪙 {rewards.coins} coins</Text>
+          </View>
+          <View style={[styles.statPill, { backgroundColor: '#2a2a2a' }]}>
+            <Text style={[styles.statPillText, { color: '#aaa' }]}>⏱️ Today {rewards.todayMinutes} min</Text>
+          </View>
         </View>
       </View>
 
       {!activeSession ? (
         <>
           {/* Duration Picker */}
-          <Text style={styles.sectionTitle}>Choose Duration</Text>
           <View style={styles.durationGrid}>
             {DURATIONS.map(d => (
               <TouchableOpacity
@@ -169,7 +174,7 @@ export default function FocusScreen({ deviceId, storage, syncEngine, hlc, setHlc
                 onPress={() => setSelectedDuration(d)}
               >
                 <Text style={[styles.durationText, selectedDuration === d && styles.durationTextActive]}>
-                  {d} min
+                  {d < 1 ? `Demo: ${Math.round(d * 60)} s` : `${d} min`}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -179,6 +184,25 @@ export default function FocusScreen({ deviceId, storage, syncEngine, hlc, setHlc
           <TouchableOpacity style={styles.startBtn} onPress={startSession}>
             <Text style={styles.startBtnText}>Start Focus Session</Text>
           </TouchableOpacity>
+
+          {/* Recent Sessions */}
+          {recentSessions.length > 0 && (
+            <View style={styles.recentSessionsContainer}>
+              {recentSessions.map(session => (
+                <View key={session.id} style={styles.recentSessionPill}>
+                  <Text style={styles.recentSessionIcon}>✅</Text>
+                  <Text style={styles.recentSessionText}>
+                    {session.payload.targetDuration < 1 
+                      ? `${Math.round(session.payload.targetDuration * 60)} sec` 
+                      : `${session.payload.targetDuration} min`} · +50 coins 
+                  </Text>
+                  <Text style={styles.recentSessionDevice}>
+                    {session.deviceId}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
         </>
       ) : (
         <>
@@ -189,7 +213,11 @@ export default function FocusScreen({ deviceId, storage, syncEngine, hlc, setHlc
               <View style={[styles.progressBarInner, { width: `${progress * 100}%` }]} />
             </View>
             <Text style={styles.timerText}>{formatTime(activeSession.timeRemaining)}</Text>
-            <Text style={styles.timerLabel}>{activeSession.targetDuration} min session</Text>
+            <Text style={styles.timerLabel}>
+              {activeSession.targetDuration < 1 
+                ? `${Math.round(activeSession.targetDuration * 60)} sec session` 
+                : `${activeSession.targetDuration} min session`}
+            </Text>
           </View>
 
           {/* Give Up Button */}
@@ -208,37 +236,29 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
   },
-  statsBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+  headerArea: {
     width: '100%',
-    backgroundColor: '#1a1a2e',
-    borderRadius: 12,
-    padding: 16,
     marginBottom: 24,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statEmoji: {
-    fontSize: 24,
-  },
-  statValue: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#e0e0e0',
-    marginTop: 4,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#888',
-    marginTop: 2,
+    alignItems: 'flex-start',
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#e0e0e0',
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#ffffff',
     marginBottom: 16,
+  },
+  statsPillRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  statPillText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   durationGrid: {
     flexDirection: 'row',
@@ -320,5 +340,35 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  recentSessionsContainer: {
+    marginTop: 32,
+    alignItems: 'center',
+    gap: 8,
+  },
+  recentSessionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(46, 213, 115, 0.1)', // Faint green background
+    borderWidth: 1,
+    borderColor: 'rgba(46, 213, 115, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  recentSessionIcon: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  recentSessionText: {
+    color: '#2ed573',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  recentSessionDevice: {
+    color: '#888',
+    fontSize: 12,
+    marginLeft: 6,
+    fontWeight: '400',
   },
 });
