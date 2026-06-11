@@ -1,0 +1,71 @@
+{
+  "name": "Alcovia WhatsApp Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "focus-success",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "focus-success"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://httpbin.org/post",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"+1234567890\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"Great job, Student {{$json.body.studentId}}! You finished a {{$json.body.minutes}} minute focus session and earned {{$json.body.coins}} coins! Keep up the streak! 🔥\"\n  }\n}",
+        "options": {}
+      },
+      "id": "2",
+      "name": "Mock WhatsApp API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        450,
+        300
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Mock WhatsApp API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "f7d7301c-ecbb-4328-98e3-baf070e67e3a",
+  "id": "alcovia-whatsapp-demo",
+  "meta": {
+    "instanceId": "local-dev"
+  },
+  "tags": []
+}
